@@ -49,9 +49,15 @@ button small { display: block; font-size: 10px; color: var(--muted); font-varian
 #stage { height: 100%; min-height: 0; position: relative; overflow: hidden; background: var(--black); border-radius: 14px; touch-action: none; user-select: none; -webkit-user-select: none; }
 .expanded #stage { border-radius: 0; }
 #video { width: 100%; height: 100%; display: block; object-fit: contain; pointer-events: none; }
-#empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 16px; gap: 12px; text-align: center; }
-#empty p { margin: 0; max-width: 330px; color: var(--muted); font-size: 12px; }
-#choose { font-size: 18px; padding: 12px 26px; background: var(--active); border-color: var(--accent); }
+/* 動画未選択: 画面全体が「動画を選ぶ」ボタン。アイコン＋小さい文字（操作ボタンと同じ作法） */
+#empty { position: absolute; inset: 0; z-index: 3; }
+#choose { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; border: 0; border-radius: 0; background: none; color: var(--text);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; }
+#choose svg { width: 64px; height: 64px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
+#choose .lbl { font-size: 14px; letter-spacing: .04em; }
+#choose small { position: absolute; left: 16px; right: 16px; bottom: max(20px, env(safe-area-inset-bottom, 0px)); font-size: 10px; color: var(--muted); }
+#choose:active svg { color: var(--accent); }
+#player:not(.ready) .timeline, #player:not(.ready) .controls { display: none; }
 #speedOverlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; font-size: clamp(32px, 10vw, 68px); font-weight: 750; text-shadow: 0 2px 12px var(--bg); }
 #speedOverlay { z-index: 3; }
 .timeline, .controls { transition: opacity .15s ease, visibility .15s; }
@@ -75,8 +81,7 @@ button small { display: block; font-size: 10px; color: var(--muted); font-varian
 @media (orientation: landscape) and (max-height: 500px) {
   .side { top: 22%; } .ctl svg, .ctl .letter { width: 24px; height: 24px; } .ctl .lbl { font-size: 10px; }
   .track { height: 26px; } .rail { top: 11px; } #seek { height: 26px; }
-  #empty { flex-direction: row; gap: 12px; padding: 8px; }
-  #empty p { max-width: 300px; font-size: 11px; } #choose { min-height: 48px; font-size: 16px; padding: 6px 16px; flex-shrink: 0; }
+  #choose svg { width: 48px; height: 48px; }
 }
 </style>
 </head>
@@ -84,7 +89,7 @@ button small { display: block; font-size: 10px; color: var(--muted); font-varian
 <main id="player" class="expanded" aria-label="手元スロー再生">
   <section id="stage" aria-label="動画。タップで操作の表示・非表示、上下スワイプで速度変更、左右スワイプでシーク">
     <video id="video" playsinline preload="auto"></video>
-    <div id="empty"><button id="choose" type="button">動画を選ぶ</button><p>iPhone の写真から動画を選びます。動画は端末の中だけで再生され、どこにも送信されません</p></div>
+    <div id="empty"><button id="choose" type="button" aria-label="動画を選ぶ"><svg viewBox="0 0 48 48"><rect x="6" y="10" width="36" height="28" rx="4"/><path d="M6 17h36M6 31h36M13 10v7M13 31v7M35 10v7M35 31v7"/><path d="M21 20.5v7l6-3.5z"/></svg><span class="lbl">タップして動画を選ぶ</span><small>動画は端末の中で再生するだけで、どこにも送信されません</small></button></div>
     <output id="speedOverlay" hidden></output>
     <div id="toast" role="status" aria-live="polite" hidden></div>
   <section class="timeline" aria-label="再生位置">
@@ -287,13 +292,13 @@ button small { display: block; font-size: 10px; color: var(--muted); font-varian
   video.addEventListener('loadedmetadata', () => {
     if (!length()) { toast('動画の長さを取得できませんでした。別の動画を選んでください'); return; }
     ready = true; video.pause(); video.currentTime = 0; setRate(rate, false, false);
-    seek.max = String(length()); $('duration').textContent = timeText(length()); $('empty').hidden = true; setUI(true);
+    seek.max = String(length()); $('duration').textContent = timeText(length()); $('empty').hidden = true; player.classList.add('ready'); setUI(true);
     for (const id of ['seek', 'back', 'forward', 'play', 'pointA', 'pointB', 'loop']) $(id).disabled = false;
     updatePoints(); updatePosition();
   });
   video.addEventListener('error', () => {
     if (!objectURL) return;
-    ready = false; cancelGesture(); finishSeek(false); video.pause(); $('empty').hidden = false; setUI(true);
+    ready = false; cancelGesture(); finishSeek(false); video.pause(); $('empty').hidden = false; player.classList.remove('ready'); setUI(true);
     for (const id of ['seek', 'back', 'forward', 'play', 'pointA', 'pointB', 'loop']) $(id).disabled = true;
     toast('この動画を読み込めませんでした。別の動画を選んでください');
   });
