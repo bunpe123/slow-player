@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="スロー再生">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.webmanifest">
+<style>html{background:#000}</style>
+<title>手元スロー再生</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #101216; --panel: #1c2027; --button: #292f39; --text: #f4f6fa;
+  --muted: #aeb8c7; --accent: #78d9bc; --active: #214c43; --line: #434e60;
+  --mark: #ffd67e; --overlay: #101216b8; --focus: #a3c8ff;
+  --black: #000;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, sans-serif; }
+button, input { font: inherit; }
+button { min-height: 48px; border: 1px solid var(--line); border-radius: 12px; background: var(--button); color: var(--text); padding: 7px 8px; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+button:disabled, input:disabled { opacity: .4; cursor: default; }
+button[aria-pressed="true"] { background: var(--active); color: var(--accent); border-color: var(--accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button small { display: block; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#player { height: 100%; min-height: 0; max-width: 1100px; margin: auto; padding: 8px; background: var(--black); }
+#player.expanded { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; margin: 0; padding: 0; z-index: 10; }
+.timeline, .controls { position: absolute; left: 0; right: 0; z-index: 2; background: var(--overlay);
+  padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: max(8px, env(safe-area-inset-right, 0px)); }
+.timeline { top: 0; padding-top: max(6px, env(safe-area-inset-top, 0px)); padding-bottom: 2px; }
+.times { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.times output { color: var(--text); }
+.track { position: relative; height: 32px; margin: 0 10px; }
+.rail { position: absolute; height: 5px; left: 0; right: 0; top: 14px; background: var(--line); border-radius: 4px; pointer-events: none; }
+#loopBand { position: absolute; height: 100%; background: var(--accent); border-radius: inherit; }
+.marker { position: absolute; top: -8px; transform: translateX(-50%); font-size: 10px; font-weight: 700; color: var(--mark); }
+.marker::after { content: ''; position: absolute; width: 2px; height: 12px; background: var(--mark); top: 12px; left: 50%; }
+#seek { position: absolute; inset: 0 -10px; width: calc(100% + 20px); height: 32px; margin: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; touch-action: none; }
+#seek::-webkit-slider-runnable-track { height: 5px; background: transparent; }
+#seek::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; height: 20px; width: 20px; margin-top: -7.5px; border: 0; border-radius: 50%; background: var(--text); }
+#seek::-moz-range-track { height: 5px; background: transparent; }
+#seek::-moz-range-thumb { height: 20px; width: 20px; border: 0; border-radius: 50%; background: var(--text); }
+#stage { height: 100%; min-height: 0; position: relative; overflow: hidden; background: var(--black); border-radius: 14px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.expanded #stage { border-radius: 0; }
+#video { width: 100%; height: 100%; display: block; object-fit: contain; pointer-events: none; }
+#empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 16px; gap: 12px; text-align: center; }
+#empty p { margin: 0; max-width: 330px; color: var(--muted); font-size: 12px; }
+#choose { font-size: 18px; padding: 12px 26px; background: var(--active); border-color: var(--accent); }
+#speedOverlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; font-size: clamp(32px, 10vw, 68px); font-weight: 750; text-shadow: 0 2px 12px var(--bg); }
+#speedOverlay { z-index: 3; }
+.timeline, .controls { transition: opacity .15s ease, visibility .15s; }
+#player.ui-hidden .timeline, #player.ui-hidden .controls { opacity: 0; visibility: hidden; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .timeline, .controls { transition: none; } }
+#toast { position: absolute; z-index: 4; top: 50%; transform: translateY(-50%); left: 8px; right: 8px; margin: auto; width: fit-content; max-width: calc(100% - 16px); padding: 9px 14px; border-radius: 10px; background: var(--overlay); color: var(--text); text-align: center; font-size: 12px; pointer-events: none; }
+/* 操作ボタン: ウゴトル風に、背景なしのアイコン＋小さい文字を動画の左右端に縦に並べる */
+.controls { inset: 0; top: 0; background: none; padding: 0; pointer-events: none; z-index: 2; }
+.side { position: absolute; top: 24%; bottom: max(14px, env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; justify-content: space-between; align-items: center; }
+.side.left { left: max(2px, env(safe-area-inset-left, 0px)); }
+.side.right { right: max(2px, env(safe-area-inset-right, 0px)); }
+.ctl { pointer-events: auto; width: 68px; min-height: 0; padding: 4px 0; border: 0; border-radius: 10px; background: none; color: var(--text);
+  display: flex; flex-direction: column; align-items: center; gap: 2px; filter: drop-shadow(0 1px 2px var(--black)) drop-shadow(0 0 6px var(--black)); }
+.ctl svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ctl .lbl { font-size: 11px; line-height: 1.2; white-space: nowrap; }
+.ctl small { font-size: 10px; color: var(--text); }
+.ctl .letter { width: 30px; height: 30px; border: 2px solid currentColor; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 15px; }
+.ctl[aria-pressed="true"] { background: none; color: var(--accent); border-color: transparent; }
+.times #speed { min-height: 28px; padding: 2px 14px; border-radius: 999px; background: var(--overlay); font-size: 13px; font-variant-numeric: tabular-nums; }
+[hidden] { display: none !important; }
+@media (orientation: landscape) and (max-height: 500px) {
+  .side { top: 22%; } .ctl svg, .ctl .letter { width: 24px; height: 24px; } .ctl .lbl { font-size: 10px; }
+  .track { height: 26px; } .rail { top: 11px; } #seek { height: 26px; }
+  #empty { flex-direction: row; gap: 12px; padding: 8px; }
+  #empty p { max-width: 300px; font-size: 11px; } #choose { min-height: 48px; font-size: 16px; padding: 6px 16px; flex-shrink: 0; }
+}
+</style>
+</head>
+<body>
+<main id="player" class="expanded" aria-label="手元スロー再生">
+  <section id="stage" aria-label="動画。タップで操作の表示・非表示、上下スワイプで速度変更、左右スワイプでシーク">
+    <video id="video" playsinline preload="auto"></video>
+    <div id="empty"><button id="choose" type="button">動画を選ぶ</button><p>iPhone の写真から動画を選びます。動画は端末の中だけで再生され、どこにも送信されません</p></div>
+    <output id="speedOverlay" hidden></output>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+  <section class="timeline" aria-label="再生位置">
+    <div class="times"><output id="current">0:00.00</output><button id="speed" type="button" aria-label="再生速度。タップで1倍に戻す">x 1.00</button><span id="duration">0:00.00</span></div>
+    <div class="track">
+      <div class="rail"><div id="loopBand" hidden></div><span id="markA" class="marker" hidden>A</span><span id="markB" class="marker" hidden>B</span></div>
+      <input id="seek" type="range" min="0" max="0" step="0.001" value="0" aria-label="再生位置" disabled>
+    </div>
+  </section>
+  <section class="controls" aria-label="動画の操作">
+    <div class="side left">
+      <button id="another" class="ctl" type="button"><svg viewBox="0 0 24 24"><path d="M3 6.5h6l2 2h10v10H3z"/><path d="M12 11.5v5M9.5 14h5"/></svg><span class="lbl">別の動画</span></button>
+      <button id="mirror" class="ctl" type="button" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M9 7 3 17h6z"/><path d="M15 7l6 10h-6z"/></svg><span class="lbl">左右反転</span></button>
+      <button id="pointA" class="ctl" type="button" disabled><span class="letter">A</span><span class="lbl">A点</span><small id="labelA">未設定</small></button>
+      <button id="back" class="ctl" type="button" disabled><svg viewBox="0 0 24 24"><path d="M5 5v14"/><path d="M19 5 8 12l11 7z"/></svg><span class="lbl">前のコマ</span></button>
+    </div>
+    <div class="side right">
+      <button id="loop" class="ctl" type="button" aria-pressed="false" disabled><svg viewBox="0 0 24 24"><path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12"/><path d="M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/></svg><span class="lbl" id="loopLabel">ループOFF</span></button>
+      <button id="play" class="ctl" type="button" disabled><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path id="playIcon" d="M10 8l6 4-6 4z"/></svg><span class="lbl" id="playLabel">再生</span></button>
+      <button id="pointB" class="ctl" type="button" disabled><span class="letter">B</span><span class="lbl">B点</span><small id="labelB">未設定</small></button>
+      <button id="forward" class="ctl" type="button" disabled><svg viewBox="0 0 24 24"><path d="M19 5v14"/><path d="M5 5l11 7-11 7z"/></svg><span class="lbl">次のコマ</span></button>
+    </div>
+  </section>
+  </section>
+  <input id="file" type="file" accept="video/*" hidden>
+</main>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const video = $('video'), seek = $('seek'), stage = $('stage');
+  const player = $('player');
+  // 横シークの感度（CSS px / 秒 / コマ）。開始位置と fps はジェスチャー中固定する。
+  const SWIPE = { threshold: 8, coarseSeconds: 20, normalSeconds: 4, pixelsPerFrame: 12 };
+  const storageKey = 'temoto-slow-player-preferences';
+  let rate = 1, mirrored = false, ready = false, objectURL = null;
+  let pointA = null, pointB = null, looping = false, fps = 30;
+  let dragging = false, resumeAfterSeek = false, gesture = null;
+  let lastFrame = null, samples = [], seekingStep = null;
+  let overlayTimer, toastTimer, rafID = 0, frameID = null;
+  const hasRVFC = typeof video.requestVideoFrameCallback === 'function';
+  const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+  const length = () => Number.isFinite(video.duration) ? video.duration : 0;
+  const timeText = value => {
+    const cs = Math.floor(Math.max(0, value || 0) * 100 + 0.00001);
+    return `${Math.floor(cs / 6000)}:${String(Math.floor(cs / 100) % 60).padStart(2, '0')}.${String(cs % 100).padStart(2, '0')}`;
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+    if (saved && typeof saved.rate === 'number' && Number.isFinite(saved.rate)) rate = Math.round(clamp(saved.rate, .1, 2) * 20) / 20;
+    if (saved && typeof saved.mirrored === 'boolean') mirrored = saved.mirrored;
+  } catch (_) { /* 保存を利用できない iframe でも動作する。 */ }
+  function save() {
+    try { localStorage.setItem(storageKey, JSON.stringify({ rate, mirrored })); } catch (_) {}
+  }
+  function toast(message) {
+    clearTimeout(toastTimer); $('toast').textContent = message; $('toast').hidden = false;
+    toastTimer = setTimeout(() => { $('toast').hidden = true; }, 2500);
+  }
+  // 動画エリアのタップで操作部（シークバー・ボタン）の表示/非表示を切り替える。
+  let uiVisible = true;
+  function setUI(show) {
+    uiVisible = show; player.classList.toggle('ui-hidden', !show);
+    if (!show && player.contains(document.activeElement)) document.activeElement.blur();
+  }
+  function setPlayIcon(playing) {
+    $('playIcon').setAttribute('d', playing ? 'M9.5 8v8M14.5 8v8' : 'M10 8l6 4-6 4z');
+    $('playLabel').textContent = playing ? '一時停止' : '再生';
+  }
+  function resetSampling() { lastFrame = null; samples = []; }
+  function setRate(value, show = false, persist = true) {
+    rate = Math.round(clamp(value, .1, 2) * 20) / 20;
+    try { video.defaultPlaybackRate = rate; video.playbackRate = rate; }
+    catch (_) { toast('この動画では指定した速度を設定できません'); }
+    resetSampling(); $('speed').textContent = `x ${rate.toFixed(2)}`;
+    if (show) {
+      clearTimeout(overlayTimer); $('speedOverlay').textContent = `${rate.toFixed(2)}x`; $('speedOverlay').hidden = false;
+      overlayTimer = setTimeout(() => { $('speedOverlay').hidden = true; }, 850);
+    }
+    if (persist) save();
+  }
+  function setMirror(persist = true) {
+    video.style.transform = mirrored ? 'scaleX(-1)' : '';
+    $('mirror').setAttribute('aria-pressed', String(mirrored));
+    if (persist) save();
+  }
+  function updatePosition() {
+    const t = ready ? video.currentTime : 0;
+    $('current').textContent = timeText(t);
+    if (!dragging) seek.value = String(t);
+    seek.setAttribute('aria-valuetext', `${timeText(t)} / ${timeText(length())}`);
+  }
+  function updatePoints() {
+    $('labelA').textContent = pointA === null ? '未設定' : timeText(pointA);
+    $('labelB').textContent = pointB === null ? '未設定' : timeText(pointB);
+    $('loop').setAttribute('aria-pressed', String(looping)); $('loopLabel').textContent = `ループ${looping ? 'ON' : 'OFF'}`;
+    const d = length();
+    for (const [id, value] of [['markA', pointA], ['markB', pointB]]) {
+      $(id).hidden = value === null || !d;
+      if (value !== null && d) $(id).style.left = `${value / d * 100}%`;
+    }
+    $('loopBand').hidden = !looping || !d;
+    if (looping && d) { $('loopBand').style.left = `${pointA / d * 100}%`; $('loopBand').style.width = `${(pointB - pointA) / d * 100}%`; }
+  }
+  const validLoop = () => pointA !== null && pointB !== null && pointB - pointA > 0.000001;
+  function setPoint(which) {
+    if (!ready) return;
+    if (which === 'A') pointA = video.currentTime; else pointB = video.currentTime;
+    if (pointA !== null && pointB !== null && pointA > pointB) [pointA, pointB] = [pointB, pointA];
+    if (looping && !validLoop()) { looping = false; toast('A点とB点を離してください'); }
+    updatePoints();
+  }
+  function clearPoint(which) {
+    if (which === 'A') pointA = null; else pointB = null;
+    looping = false; updatePoints(); toast(`${which}点をクリアしました`);
+  }
+  function toggleLoop() {
+    if (!ready) return;
+    if (!looping && (pointA === null || pointB === null)) { toast('A点とB点を先に決めてください'); return; }
+    if (!looping && !validLoop()) { toast('A点とB点を離してください'); return; }
+    looping = !looping;
+    if (looping && (video.currentTime < pointA || video.currentTime >= pointB)) video.currentTime = pointA;
+    updatePoints();
+  }
+  function checkLoop() {
+    if (looping && validLoop() && !dragging && !video.paused && !video.seeking && video.currentTime >= pointB) video.currentTime = pointA;
+  }
+  async function startPlay() {
+    if (!ready || dragging) return;
+    if (looping && validLoop() && (video.currentTime < pointA || video.currentTime >= pointB)) video.currentTime = pointA;
+    else if (video.ended) video.currentTime = 0;
+    try { await video.play(); } catch (_) { toast('再生できませんでした。再生ボタンをもう一度押してください'); }
+  }
+  // 一時停止→再開で少し先へ飛ぶ問題に、止めるときに最後に表示されたコマへ合わせ直す対策を試したが、
+  // 数コマ戻ったうえ再開時にカクついて悪化したので戻した（v9→v10）。
+  function togglePlay() { if (!ready) return; if (video.paused) startPlay(); else video.pause(); }
+  function step(direction) {
+    if (!ready) return;
+    video.pause();
+    const base = seekingStep === null ? video.currentTime : seekingStep;
+    seekingStep = clamp(base + direction / fps, 0, length());
+    video.currentTime = seekingStep; updatePosition();
+  }
+  function beginSeek() {
+    if (!ready || dragging) return;
+    dragging = true; resumeAfterSeek = !video.paused; video.pause(); seekingStep = null;
+  }
+  function finishSeek(allowResume = true) {
+    if (!dragging) return;
+    dragging = false; const resume = resumeAfterSeek; resumeAfterSeek = false;
+    updatePosition(); if (resume && allowResume !== false) startPlay();
+  }
+  seek.addEventListener('pointerdown', event => {
+    if (!ready) return;
+    beginSeek(); try { seek.setPointerCapture(event.pointerId); } catch (_) {}
+  });
+  // 指が動くたびに位置を移す（2026-11-13 にシークを間引く版を試したら iPhone で追従が悪くなったので戻した）。
+  seek.addEventListener('input', () => { beginSeek(); video.currentTime = Number(seek.value); updatePosition(); });
+  for (const name of ['pointerup', 'pointercancel', 'lostpointercapture', 'change', 'blur']) seek.addEventListener(name, finishSeek);
+
+  // コールバックが落ちた区間やシーク・速度変更をまたぐ区間を推定に使わない。
+  function measureFrame(metadata) {
+    if (video.paused || video.seeking || dragging) { lastFrame = null; return; }
+    if (lastFrame) {
+      const delta = metadata.mediaTime - lastFrame.mediaTime;
+      const frames = metadata.presentedFrames - lastFrame.presentedFrames;
+      if (frames === 1 && delta >= 1 / 500 && delta <= 1 / 10) {
+        samples.push(delta); if (samples.length > 61) samples.shift();
+        if (samples.length >= 12) {
+          const sorted = [...samples].sort((a, b) => a - b), raw = 1 / sorted[Math.floor(sorted.length / 2)];
+          const common = [24, 25, 30, 50, 60, 90, 120, 144, 240];
+          const near = common.reduce((a, b) => Math.abs(b - raw) < Math.abs(a - raw) ? b : a);
+          fps = Math.abs(near - raw) / raw < .04 ? near : Math.round(raw * 100) / 100;
+          
+        }
+      }
+    }
+    lastFrame = { mediaTime: metadata.mediaTime, presentedFrames: metadata.presentedFrames };
+  }
+  function onFrame(_now, metadata) {
+    measureFrame(metadata); checkLoop(); updatePosition();
+    frameID = video.requestVideoFrameCallback(onFrame);
+  }
+  function animate() {
+    updatePosition(); if (!hasRVFC) checkLoop();
+    if (!video.paused && !video.ended) rafID = requestAnimationFrame(animate); else rafID = 0;
+  }
+  video.addEventListener('play', () => {
+    seekingStep = null; lastFrame = null; setPlayIcon(true);
+    cancelAnimationFrame(rafID); rafID = requestAnimationFrame(animate);
+  });
+  video.addEventListener('pause', () => { setPlayIcon(false); cancelAnimationFrame(rafID); rafID = 0; updatePosition(); });
+  video.addEventListener('timeupdate', updatePosition);
+  video.addEventListener('seeking', resetSampling);
+  video.addEventListener('seeked', () => { seekingStep = null; updatePosition(); });
+  video.addEventListener('ended', () => {
+    setPlayIcon(false);
+    if (looping && validLoop() && !dragging) { video.currentTime = pointA; startPlay(); }
+  });
+  video.addEventListener('loadedmetadata', () => {
+    if (!length()) { toast('動画の長さを取得できませんでした。別の動画を選んでください'); return; }
+    ready = true; video.pause(); video.currentTime = 0; setRate(rate, false, false);
+    seek.max = String(length()); $('duration').textContent = timeText(length()); $('empty').hidden = true; setUI(true);
+    for (const id of ['seek', 'back', 'forward', 'play', 'pointA', 'pointB', 'loop']) $(id).disabled = false;
+    updatePoints(); updatePosition();
+  });
+  video.addEventListener('error', () => {
+    if (!objectURL) return;
+    ready = false; cancelGesture(); finishSeek(false); video.pause(); $('empty').hidden = false; setUI(true);
+    for (const id of ['seek', 'back', 'forward', 'play', 'pointA', 'pointB', 'loop']) $(id).disabled = true;
+    toast('この動画を読み込めませんでした。別の動画を選んでください');
+  });
+  $('file').addEventListener('change', () => {
+    const file = $('file').files && $('file').files[0]; if (!file) return;
+    video.pause(); ready = false; dragging = false; resumeAfterSeek = false; gesture = null; seekingStep = null;
+    clearGestureFeedback();
+    pointA = pointB = null; looping = false; fps = 30; resetSampling();
+    $('duration').textContent = '0:00.00'; seek.value = '0'; seek.max = '0';
+    $('toast').hidden = true; $('speedOverlay').hidden = true;
+    for (const id of ['seek', 'back', 'forward', 'play', 'pointA', 'pointB', 'loop']) $(id).disabled = true;
+    video.removeAttribute('src'); video.load();
+    if (objectURL) URL.revokeObjectURL(objectURL);
+    objectURL = URL.createObjectURL(file); video.src = objectURL; setRate(rate, false, false); video.load();
+    updatePoints(); updatePosition(); $('file').value = '';
+  });
+  for (const id of ['choose', 'another']) $(id).addEventListener('click', () => $('file').click());
+  $('play').addEventListener('click', togglePlay);
+  $('loop').addEventListener('click', toggleLoop);
+  $('mirror').addEventListener('click', () => { mirrored = !mirrored; setMirror(); });
+  $('speed').addEventListener('click', () => setRate(1, true));
+  // pointer の長押しは離した後の click を抑制し、キーボード由来の click は維持。
+  function holdButton(id, click, hold, repeat) {
+    const button = $(id); let timer = null, interval = null, held = false, pointer = null, suppress = false;
+    const stop = () => { clearTimeout(timer); clearInterval(interval); timer = interval = null; pointer = null; };
+    button.addEventListener('pointerdown', event => {
+      if (button.disabled || !event.isPrimary || event.button !== 0) return;
+      stop(); held = false; suppress = false; pointer = event.pointerId;
+      try { button.setPointerCapture(pointer); } catch (_) {}
+      if (repeat) { click(); suppress = true; }
+      timer = setTimeout(() => { held = true; suppress = true; hold(); if (repeat) interval = setInterval(hold, 125); }, repeat ? 350 : 600);
+    });
+    button.addEventListener('pointerup', event => { if (event.pointerId === pointer) { if (!repeat && !held) { click(); suppress = true; } stop(); } });
+    for (const name of ['pointercancel', 'lostpointercapture']) button.addEventListener(name, stop);
+    button.addEventListener('click', event => { if (event.detail === 0 || !suppress) click(); suppress = false; });
+    window.addEventListener('blur', stop); document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); });
+  }
+  holdButton('back', () => step(-1), () => step(-1), true);
+  holdButton('forward', () => step(1), () => step(1), true);
+  holdButton('pointA', () => setPoint('A'), () => clearPoint('A'), false);
+  holdButton('pointB', () => setPoint('B'), () => clearPoint('B'), false);
+  function clearGestureFeedback() {
+    clearTimeout(overlayTimer); $('speedOverlay').hidden = true;
+  }
+  function cancelGesture() {
+    const previous = gesture; gesture = null;
+    if (previous && stage.hasPointerCapture(previous.id)) stage.releasePointerCapture(previous.id);
+    finishSeek(false); clearGestureFeedback();
+  }
+  stage.addEventListener('pointerdown', event => {
+    if (!ready || dragging || gesture || !event.isPrimary || event.button !== 0 || event.target.closest('button, input, .timeline, .controls')) return;
+    clearGestureFeedback();
+    const rect = stage.getBoundingClientRect();
+    gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, rate, axis: null,
+      mode: clamp(Math.floor((event.clientY - rect.top) / Math.max(1, rect.height) * 3), 0, 2),
+      width: Math.max(1, rect.width), fps };
+    // 横スワイプの出だしで映像が遅れる対策: 触れた瞬間に今の位置へ 1 回シークして、読み出しの準備を先に始めておく。
+    if (video.paused && !video.seeking) video.currentTime = video.currentTime;
+    try { stage.setPointerCapture(event.pointerId); } catch (_) {}
+  });
+  stage.addEventListener('pointermove', event => {
+    if (!gesture || event.pointerId !== gesture.id) return;
+    const dx = event.clientX - gesture.x, dy = gesture.y - event.clientY;
+    if (!gesture.axis && Math.hypot(dx, dy) >= SWIPE.threshold) {
+      gesture.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      if (gesture.axis === 'x') { gesture.time = video.currentTime; beginSeek(); }
+    }
+    if (gesture.axis === 'x') {
+      const frames = Math.trunc(dx / SWIPE.pixelsPerFrame);
+      const delta = gesture.mode === 2 ? frames / gesture.fps : dx / gesture.width * (gesture.mode === 0 ? SWIPE.coarseSeconds : SWIPE.normalSeconds);
+      const target = clamp(gesture.time + delta, 0, length());
+      video.currentTime = target; seek.value = String(target); updatePosition();
+    } else if (gesture.axis === 'y') {
+      const value = gesture.rate + dy / Math.max(100, document.documentElement.clientHeight / 2) * 1.9;
+      const rounded = Math.round(clamp(value, .1, 2) * 20) / 20;
+      if (rounded !== rate) setRate(rounded, true, false);
+      clearTimeout(overlayTimer); $('speedOverlay').textContent = `${rate.toFixed(2)}x`; $('speedOverlay').hidden = false;
+    }
+  });
+  function endGesture(event) {
+    if (!gesture || gesture.id !== event.pointerId) return;
+    const previous = gesture, tapped = !gesture.axis && event.type === 'pointerup'; gesture = null; save();
+    if (stage.hasPointerCapture(previous.id)) stage.releasePointerCapture(previous.id);
+    if (previous.axis === 'x') finishSeek();
+    overlayTimer = setTimeout(() => { $('speedOverlay').hidden = true; }, 650);
+    if (tapped && ready) setUI(!uiVisible);
+  }
+  for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) stage.addEventListener(name, endGesture);
+  stage.addEventListener('contextmenu', event => event.preventDefault());
+  document.addEventListener('keydown', event => {
+    if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    const key = event.key.toLowerCase();
+    if (key === ' ' && event.target.closest('button')) return;
+    const actions = { ' ': togglePlay, arrowleft: () => step(-1), arrowright: () => step(1), arrowup: () => setRate(rate + .05, true), arrowdown: () => setRate(rate - .05, true), a: () => setPoint('A'), b: () => setPoint('B'), l: toggleLoop, m: () => { mirrored = !mirrored; setMirror(); }, h: () => { if (ready) setUI(!uiVisible); } };
+    if (actions[key]) { event.preventDefault(); if (!event.repeat || key.startsWith('arrow')) actions[key](); }
+  });
+  window.addEventListener('blur', cancelGesture);
+  window.addEventListener('resize', cancelGesture);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) cancelGesture(); });
+  window.addEventListener('pagehide', event => {
+    if (!event.persisted) {
+      if (objectURL) URL.revokeObjectURL(objectURL);
+      if (frameID !== null && hasRVFC) video.cancelVideoFrameCallback(frameID);
+      cancelAnimationFrame(rafID);
+    }
+  });
+  setRate(rate, false, false); setMirror(false); updatePoints(); updatePosition();
+  if (hasRVFC) frameID = video.requestVideoFrameCallback(onFrame);
+})();
+</script>
+</body>
+</html>
